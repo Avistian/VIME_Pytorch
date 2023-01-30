@@ -6,7 +6,7 @@ from vime_semi import VIMESemi
 from vime_self import VIMESelf
 
 class VIME(nn.Module):
-    def __init__(self, alpha, K, device, encoder_backbone=None, feature_estimator_backbone=None, mask_estimator_backbone=None, predictor_backbone=None):
+    def __init__(self, alpha, K, num_epochs, device, encoder_backbone=None, feature_estimator_backbone=None, mask_estimator_backbone=None, predictor_backbone=None):
         super(VIME, self).__init__()
         self.encoder_backbone = encoder_backbone
         self.feature_estimator_backbone = feature_estimator_backbone
@@ -15,14 +15,33 @@ class VIME(nn.Module):
         self.K = K
         self.alpha = alpha
         self.device = device
-        self.VIME_self = VIMESelf(self.encoder_backbone, self.mask_estimator_backbone, self.feature_estimator_backbone)
-        self.VIME_semi = VIMESemi(self.encoder_backbone, self.predictor_backbone, self.K)
+        self.num_epochs = num_epochs
+        self.VIME_self = VIMESelf(self.encoder_backbone, self.mask_estimator_backbone, self.feature_estimator_backbone).to(self.device)
+        self.VIME_semi = VIMESemi(self.encoder_backbone, self.predictor_backbone, self.K).to(self.device)
         
     def fit(self, train_loader, unsup_dataset, test_loader, epochs, lr, batch_size, K, beta):
-        pass
+        print("Training Self VIME")
+        for epoch in range(epochs):
+            print(f"Epoch {epoch+1}\n-------------------------------")
+            self._train_loop_self(train_loader, self.VIME_self, self._loss_fn, lr)
+            self._test_loop_self(test_loader, self.VIME_self, self._loss_fn)
+            
+        self.VIME_semi.encoder = self.VIME_self.encoder
+        
+        print("Training Semi VIME")
+        for epoch in range(epochs):
+            print(f"Epoch {epoch+1}\n-------------------------------")
+            self._train_loop_semi(unsup_dataset, self.VIME_semi, self._loss_fn_semi, lr, batch_size, K, beta)
+            loss = self._test_loop_semi(test_loader, self.VIME_semi, self._loss_fn_semi)
+            if min_loss > loss:
+                min_loss = loss
+                min_loss_iter = epoch
+            if epoch - min_loss_iter > 20:
+                break       
     
     def predict(self, x):
-        pass
+        y_logit, y_hat = self.VIME_semi.predict(x)
+        return y_hat
         
     def _generate_mask(self, shape, p_corr):
         mask = np.random.binomial(1, p_corr, shape)
